@@ -1,0 +1,6 @@
+{
+  "name": "StratX Predictive Football Engine",
+  "description": "Plateforme d'analyse sportive prédictive de pointe, arbitrage de valeur (EV+), suivi des matchs en temps réel et automatisation transparente de prise de décision.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
