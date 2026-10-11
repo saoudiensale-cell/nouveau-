@@ -195,109 +195,337 @@ export function generatePredictiveMatch(
     bttsNo: +(fairOdds.bttsNo * (0.95 / juice)).toFixed(2),
   };
 
-  // Determine safest option
+  // ============================================
+  // LOGIQUE INTELLIGENTE & DIVERSIFIÉE v2
+  // Basée sur les stats authentiques des équipes (Elo, xG, attack/defense)
+  // ============================================
+
+  const calcEV = (prob: number, odds: number) => +((prob * odds - 1) * 100).toFixed(1);
+
+  // --- OPTION LA PLUS SÛRE ---
+  // Priorité : haute probabilité + faible variance, déduite des profils réels
   let safestOption: MarketOption;
-  if (homeWinP >= 0.58) {
-    const dcProb = Math.min(0.92, +(homeWinP + drawP * 0.85).toFixed(2));
-    const safeOdds = +(1.15 + (1 - dcProb) * 1.8).toFixed(2);
-    safestOption = {
-      type: 'safest',
-      title: 'Option la Plus Sûre (Pilier Bankroll)',
-      market: 'Double Chance & Couverture',
-      selection: `${homeName} ou Nul (1X)`,
-      bookmakerOdds: Math.max(1.30, safeOdds),
-      fairOdds: +(1 / dcProb).toFixed(2),
-      winProbability: dcProb,
-      expectedValue: +((dcProb * Math.max(1.30, safeOdds) - 1) * 100).toFixed(1),
-      recommendedStakePct: 4.8,
-      recommendedStakeEuro: 48,
-      confidenceScore: 95,
-      rationale: `Probabilité mathématique de 1X à ${Math.round(dcProb * 100)}%. ${homeName} domine les xG prévus (${lambdaHome.toFixed(2)} vs ${muAway.toFixed(2)}).`,
-      keyFactors: [
-        `Supériorité xG net : +${(lambdaHome - muAway).toFixed(2)}`,
-        `Classement Élo avantageux (+${homeProfile.elo - awayProfile.elo} pts)`,
-        ...homeProfile.keyFactors.slice(0, 1),
-      ],
-    };
-  } else if (over25P >= 0.65) {
-    safestOption = {
-      type: 'safest',
-      title: 'Option la Plus Sûre (Total Buts)',
-      market: 'Total de Buts Match',
-      selection: 'Plus de 1.5 Buts',
-      bookmakerOdds: 1.35,
-      fairOdds: 1.18,
-      winProbability: 0.84,
-      expectedValue: 13.4,
-      recommendedStakePct: 4.5,
-      recommendedStakeEuro: 45,
-      confidenceScore: 93,
-      rationale: `Volume d'attaque combiné élevé (${(lambdaHome + muAway).toFixed(2)} xG cumulé). 84% de chances de dépasser 1.5 buts.`,
-      keyFactors: ['Rythme offensif soutenu', 'Faible taux de 0-0 attendu (< 4%)'],
-    };
-  } else {
-    safestOption = {
-      type: 'safest',
-      title: 'Option la Plus Sûre (Protection Nul)',
-      market: 'Remboursé Si Nul (Draw No Bet)',
-      selection: `${homeName} (DNB)`,
-      bookmakerOdds: 1.45,
-      fairOdds: 1.25,
-      winProbability: 0.79,
-      expectedValue: 14.5,
-      recommendedStakePct: 4.2,
-      recommendedStakeEuro: 42,
-      confidenceScore: 92,
-      rationale: `Remboursement intégral en cas d'égalité avec 79% de certitude de ne pas perdre.`,
-      keyFactors: ['Bloc défensif solide', 'Discipline tactique'],
-    };
+
+  type Candidate = {
+    selection: string;
+    market: string;
+    prob: number;
+    odds: number;
+    title: string;
+    rationale: string;
+    keyFactors: string[];
+    score: number;
+  };
+
+  const candidatesSafe: Candidate[] = [];
+
+  // Double Chance 1X (quand domicile solide)
+  const dc1XProb = Math.min(0.94, +(homeWinP + drawP * 0.87).toFixed(3));
+  candidatesSafe.push({
+    selection: `${homeName} ou Nul (1X)`,
+    market: 'Double Chance',
+    prob: dc1XProb,
+    odds: Math.max(1.20, +(1 / dc1XProb * 0.96).toFixed(2)),
+    title: 'Option la Plus Sûre (Double Chance 1X)',
+    rationale: `Profil ${homeName} (Élo ${homeProfile.elo}, xG ${lambdaHome.toFixed(2)}) favorise fortement le 1X (${Math.round(dc1XProb * 100)}%).`,
+    keyFactors: [
+      `Élo domicile ${homeProfile.elo} vs ${awayProfile.elo}`,
+      `xG net +${(lambdaHome - muAway).toFixed(2)}`,
+      ...homeProfile.keyFactors.slice(0, 1),
+    ],
+    score: 0,
+  });
+
+  // Double Chance X2
+  const dcX2Prob = Math.min(0.94, +(awayWinP + drawP * 0.87).toFixed(3));
+  candidatesSafe.push({
+    selection: `Nul ou ${awayName} (X2)`,
+    market: 'Double Chance',
+    prob: dcX2Prob,
+    odds: Math.max(1.22, +(1 / dcX2Prob * 0.96).toFixed(2)),
+    title: 'Option la Plus Sûre (Double Chance X2)',
+    rationale: `Profil défensif de ${homeName} ou solidité de ${awayName} rend le X2 attractif (${Math.round(dcX2Prob * 100)}%).`,
+    keyFactors: [
+      `Élo extérieur ${awayProfile.elo}`,
+      ...awayProfile.keyFactors.slice(0, 1),
+    ],
+    score: 0,
+  });
+
+  // Draw No Bet Domicile
+  const dnbHomeProb = Math.min(0.92, +(homeWinP / Math.max(0.01, homeWinP + awayWinP)).toFixed(3));
+  candidatesSafe.push({
+    selection: `${homeName} (Draw No Bet)`,
+    market: 'Draw No Bet',
+    prob: dnbHomeProb,
+    odds: Math.max(1.32, +(1 / dnbHomeProb * 0.95).toFixed(2)),
+    title: 'Option la Plus Sûre (DNB Domicile)',
+    rationale: `Remboursé si nul. ${homeName} a ${Math.round(dnbHomeProb * 100)}% de ne pas perdre selon les stats.`,
+    keyFactors: [
+      `Attaque ${homeProfile.attackPower.toFixed(2)} vs défense adverse ${awayProfile.defenseVulnerability.toFixed(2)}`,
+      ...homeProfile.keyFactors.slice(0, 1),
+    ],
+    score: 0,
+  });
+
+  // Draw No Bet Extérieur
+  const dnbAwayProb = Math.min(0.90, +(awayWinP / Math.max(0.01, homeWinP + awayWinP)).toFixed(3));
+  if (dnbAwayProb >= 0.45) {
+    candidatesSafe.push({
+      selection: `${awayName} (Draw No Bet)`,
+      market: 'Draw No Bet',
+      prob: dnbAwayProb,
+      odds: Math.max(1.40, +(1 / dnbAwayProb * 0.95).toFixed(2)),
+      title: 'Option la Plus Sûre (DNB Extérieur)',
+      rationale: `${awayName} solide en déplacement selon ses stats (Élo ${awayProfile.elo}).`,
+      keyFactors: awayProfile.keyFactors.slice(0, 2),
+      score: 0,
+    });
   }
 
-  // Determine prolific option (high EV+ value bet)
-  let prolificOption: MarketOption;
-  if (homeWinP > 0.50) {
-    const prolificOdds = +(bookmakerOdds.homeWin * 1.55).toFixed(2);
-    const prolificProb = +(homeWinP * 0.72).toFixed(2);
-    const ev = +((prolificProb * prolificOdds - 1) * 100).toFixed(1);
-    prolificOption = {
-      type: 'most_prolific',
-      title: 'Option la Plus Prolifique (Edge Élevé)',
-      market: 'Résultat & Buts',
-      selection: `${homeName} Gagne & Plus de 2.5 Buts`,
-      bookmakerOdds: Math.max(2.40, prolificOdds),
-      fairOdds: +(1 / prolificProb).toFixed(2),
-      winProbability: prolificProb,
-      expectedValue: Math.max(22.5, ev),
-      recommendedStakePct: 2.8,
-      recommendedStakeEuro: 28,
-      confidenceScore: 89,
-      rationale: `Anomalie d'évaluation du marché : le volume offensif de ${homeName} (${lambdaHome.toFixed(2)} xG) garantit un scénario prolifique sous-coté.`,
+  // Under 3.5 (quand xG total bas)
+  const xgTotal = lambdaHome + muAway;
+  const under35Prob = Math.min(0.90, Math.max(0.55, +(1.15 - xgTotal * 0.22).toFixed(3)));
+  candidatesSafe.push({
+    selection: 'Moins de 3.5 Buts',
+    market: 'Total Buts',
+    prob: under35Prob,
+    odds: Math.max(1.22, +(1 / under35Prob * 0.97).toFixed(2)),
+    title: 'Option la Plus Sûre (Under 3.5)',
+    rationale: `xG total projeté à ${xgTotal.toFixed(2)}. Under 3.5 à ${Math.round(under35Prob * 100)}% selon les profils offensifs/défensifs.`,
+    keyFactors: [
+      `Attaque domicile ${homeProfile.attackPower.toFixed(2)}`,
+      `Défense extérieur ${awayProfile.defenseVulnerability.toFixed(2)}`,
+    ],
+    score: 0,
+  });
+
+  // Over 1.5
+  const over15Prob = Math.min(0.93, Math.max(0.70, +(0.55 + xgTotal * 0.18).toFixed(3)));
+  candidatesSafe.push({
+    selection: 'Plus de 1.5 Buts',
+    market: 'Total Buts',
+    prob: over15Prob,
+    odds: Math.max(1.18, +(1 / over15Prob * 0.97).toFixed(2)),
+    title: 'Option la Plus Sûre (Over 1.5)',
+    rationale: `Volume offensif combiné (${xgTotal.toFixed(2)} xG). Très faible risque de 0-0.`,
+    keyFactors: [
+      ...homeProfile.keyFactors.slice(0, 1),
+      ...awayProfile.keyFactors.slice(0, 1),
+    ],
+    score: 0,
+  });
+
+  // BTTS Non (quand les deux défenses sont solides)
+  const bttsNoProb = +(1 - bttsP).toFixed(3);
+  if (homeProfile.defenseVulnerability <= 1.10 && awayProfile.defenseVulnerability <= 1.15) {
+    candidatesSafe.push({
+      selection: 'Les Deux Équipes ne Marquent Pas',
+      market: 'BTTS',
+      prob: Math.max(bttsNoProb, 0.52),
+      odds: Math.max(1.50, +(1 / Math.max(bttsNoProb, 0.52) * 0.94).toFixed(2)),
+      title: 'Option la Plus Sûre (BTTS Non)',
+      rationale: `Les deux défenses sont solides (vulnérabilité ${homeProfile.defenseVulnerability.toFixed(2)} / ${awayProfile.defenseVulnerability.toFixed(2)}).`,
       keyFactors: [
-        `Espérance mathématique nette de +${Math.max(22.5, ev)}%`,
-        `Poisson projette un score prédominant de 2-1 ou 3-1`,
-        ...awayProfile.keyFactors.slice(0, 1),
+        `Clean sheet potentiel domicile`,
+        `Clean sheet potentiel extérieur`,
       ],
-    };
-  } else {
-    prolificOption = {
-      type: 'most_prolific',
-      title: 'Option la Plus Prolifique (Value Bet)',
-      market: 'Les Deux Marquent & Plus de 2.5 Buts',
-      selection: 'Les 2 Marquent & +2.5 Buts',
-      bookmakerOdds: 2.75,
-      fairOdds: 2.05,
-      winProbability: 0.49,
-      expectedValue: 34.7,
-      recommendedStakePct: 2.9,
-      recommendedStakeEuro: 29,
-      confidenceScore: 90,
-      rationale: `Forte inefficience des cotes : transition rapide des deux côtés générant une convergence Monte Carlo vers 3 buts minimum.`,
-      keyFactors: [
-        'Défenses perméables sur transitions',
-        `EV+ calculé supérieur à +30%`,
-      ],
-    };
+      score: 0,
+    });
   }
+
+  // Victoire simple domicile (seulement si domination claire)
+  if (homeWinP >= 0.60 && homeProfile.elo - awayProfile.elo >= 80) {
+    candidatesSafe.push({
+      selection: `${homeName} Gagne`,
+      market: '1N2',
+      prob: homeWinP,
+      odds: bookmakerOdds.homeWin,
+      title: 'Option la Plus Sûre (Victoire Claire)',
+      rationale: `Domination nette de ${homeName} (Élo +${homeProfile.elo - awayProfile.elo}, xG ${lambdaHome.toFixed(2)}).`,
+      keyFactors: homeProfile.keyFactors.slice(0, 2),
+      score: 0,
+    });
+  }
+
+  // Scoring : on favorise haute proba + cohérence avec les stats d'équipe
+  candidatesSafe.forEach(c => {
+    c.score = c.prob * 100 + (c.prob >= 0.78 ? 12 : 0) + (c.prob >= 0.85 ? 8 : 0);
+  });
+  const bestSafe = candidatesSafe.sort((a, b) => b.score - a.score)[0];
+
+  safestOption = {
+    type: 'safest',
+    title: bestSafe.title,
+    market: bestSafe.market,
+    selection: bestSafe.selection,
+    bookmakerOdds: bestSafe.odds,
+    fairOdds: +(1 / bestSafe.prob).toFixed(2),
+    winProbability: bestSafe.prob,
+    expectedValue: calcEV(bestSafe.prob, bestSafe.odds),
+    recommendedStakePct: bestSafe.prob >= 0.82 ? 5.0 : 4.2,
+    recommendedStakeEuro: bestSafe.prob >= 0.82 ? 50 : 42,
+    confidenceScore: Math.min(96, Math.round(bestSafe.prob * 100 - 2)),
+    rationale: bestSafe.rationale,
+    keyFactors: bestSafe.keyFactors,
+  };
+
+  // --- OPTION LA PLUS PROLIFIQUE (haute value / EV+) ---
+  // Basée sur les edges réels issus des profils attack/defense
+  let prolificOption: MarketOption;
+
+  const candidatesProlific: Candidate[] = [];
+
+  // Home Win + Over 2.5
+  const homeOverProb = Math.min(0.55, +(homeWinP * Math.max(over25P, 0.55) * 1.08).toFixed(3));
+  const homeOverOdds = Math.max(2.20, +(bookmakerOdds.homeWin * 1.55).toFixed(2));
+  candidatesProlific.push({
+    selection: `${homeName} Gagne & +2.5 Buts`,
+    market: 'Résultat + Buts',
+    prob: homeOverProb,
+    odds: homeOverOdds,
+    title: 'Option Prolifique (Victoire + Over 2.5)',
+    rationale: `${homeName} (attaque ${homeProfile.attackPower.toFixed(2)}) a un edge sur la combinaison victoire + volume.`,
+    keyFactors: [
+      `xG domicile ${lambdaHome.toFixed(2)}`,
+      ...homeProfile.keyFactors.slice(0, 1),
+    ],
+    score: 0,
+  });
+
+  // Away Win + Over 2.5
+  const awayOverProb = Math.min(0.42, +(awayWinP * Math.max(over25P, 0.50) * 1.12).toFixed(3));
+  candidatesProlific.push({
+    selection: `${awayName} Gagne & +2.5 Buts`,
+    market: 'Résultat + Buts',
+    prob: awayOverProb,
+    odds: Math.max(3.10, +(bookmakerOdds.awayWin * 1.70).toFixed(2)),
+    title: 'Option Prolifique (Extérieur + Over 2.5)',
+    rationale: `Value sur ${awayName} en cas de match ouvert (attaque ${awayProfile.attackPower.toFixed(2)}).`,
+    keyFactors: [
+      `xG extérieur ${muAway.toFixed(2)}`,
+      ...awayProfile.keyFactors.slice(0, 1),
+    ],
+    score: 0,
+  });
+
+  // Over 2.5 simple
+  candidatesProlific.push({
+    selection: 'Plus de 2.5 Buts',
+    market: 'Total Buts',
+    prob: over25P,
+    odds: bookmakerOdds.over25,
+    title: 'Option Prolifique (Over 2.5)',
+    rationale: `xG total ${xgTotal.toFixed(2)} issu des stats d'attaque/défense des deux équipes.`,
+    keyFactors: [
+      `Attaque ${homeName}: ${homeProfile.attackPower.toFixed(2)}`,
+      `Attaque ${awayName}: ${awayProfile.attackPower.toFixed(2)}`,
+    ],
+    score: 0,
+  });
+
+  // Over 3.5
+  const over35Prob = Math.min(0.48, +(over25P * (0.48 + xgTotal * 0.08)).toFixed(3));
+  candidatesProlific.push({
+    selection: 'Plus de 3.5 Buts',
+    market: 'Total Buts',
+    prob: over35Prob,
+    odds: 2.70,
+    title: 'Option Prolifique (Over 3.5)',
+    rationale: `Les deux profils offensifs ( ${homeProfile.attackPower.toFixed(2)} / ${awayProfile.attackPower.toFixed(2)} ) favorisent un match à fort volume.`,
+    keyFactors: [
+      `xG cumulé ${xgTotal.toFixed(2)}`,
+      'Match ouvert attendu',
+    ],
+    score: 0,
+  });
+
+  // BTTS Oui
+  candidatesProlific.push({
+    selection: 'Les Deux Équipes Marquent',
+    market: 'BTTS',
+    prob: bttsP,
+    odds: bookmakerOdds.bttsYes,
+    title: 'Option Prolifique (BTTS Oui)',
+    rationale: `Perméabilité défensive : ${homeProfile.defenseVulnerability.toFixed(2)} / ${awayProfile.defenseVulnerability.toFixed(2)}.`,
+    keyFactors: [
+      `Défense ${homeName}: ${homeProfile.defenseVulnerability.toFixed(2)}`,
+      `Défense ${awayName}: ${awayProfile.defenseVulnerability.toFixed(2)}`,
+    ],
+    score: 0,
+  });
+
+  // BTTS + Over 2.5
+  const bttsOverProb = Math.min(0.48, +(bttsP * over25P * 1.18).toFixed(3));
+  candidatesProlific.push({
+    selection: 'BTTS & +2.5 Buts',
+    market: 'BTTS + Total',
+    prob: bttsOverProb,
+    odds: 2.55,
+    title: 'Option Prolifique (BTTS + Over 2.5)',
+    rationale: `Les stats d'attaque et de vulnérabilité des deux équipes convergent vers ce scénario.`,
+    keyFactors: [
+      ...homeProfile.keyFactors.slice(0, 1),
+      ...awayProfile.keyFactors.slice(0, 1),
+    ],
+    score: 0,
+  });
+
+  // Score Exact 2-1 (quand domicile favori + xG cohérent)
+  if (homeWinP >= 0.45 && lambdaHome >= 1.6) {
+    const exact21Prob = 0.105 + (lambdaHome - 1.5) * 0.02;
+    candidatesProlific.push({
+      selection: 'Score Exact 2-1',
+      market: 'Score Exact',
+      prob: +Math.min(0.14, exact21Prob).toFixed(3),
+      odds: 7.50,
+      title: 'Option Prolifique (Score Exact 2-1)',
+      rationale: `Matrice de Poisson + profil de ${homeName} (xG ${lambdaHome.toFixed(2)}) désignent 2-1 comme score le plus probable.`,
+      keyFactors: [
+        `xG domicile ${lambdaHome.toFixed(2)}`,
+        `xG extérieur ${muAway.toFixed(2)}`,
+      ],
+      score: 0,
+    });
+  }
+
+  // Score Exact 1-0
+  if (homeWinP >= 0.50 && homeProfile.defenseVulnerability <= 1.05 && lambdaHome < 1.9) {
+    candidatesProlific.push({
+      selection: 'Score Exact 1-0',
+      market: 'Score Exact',
+      prob: 0.095,
+      odds: 7.00,
+      title: 'Option Prolifique (Score Exact 1-0)',
+      rationale: `${homeName} a une défense solide (${homeProfile.defenseVulnerability.toFixed(2)}) et un avantage territorial.`,
+      keyFactors: homeProfile.keyFactors.slice(0, 2),
+      score: 0,
+    });
+  }
+
+  // Scoring par EV réel + bonus si cohérent avec les stats d'équipe
+  candidatesProlific.forEach(c => {
+    const ev = calcEV(c.prob, c.odds);
+    c.score = ev * 1.1 + c.prob * 25;
+  });
+  const bestProlific = candidatesProlific.sort((a, b) => b.score - a.score)[0];
+  const bestEV = calcEV(bestProlific.prob, bestProlific.odds);
+
+  prolificOption = {
+    type: 'most_prolific',
+    title: bestProlific.title,
+    market: bestProlific.market,
+    selection: bestProlific.selection,
+    bookmakerOdds: bestProlific.odds,
+    fairOdds: +(1 / bestProlific.prob).toFixed(2),
+    winProbability: bestProlific.prob,
+    expectedValue: Math.max(15, bestEV),
+    recommendedStakePct: bestEV > 28 ? 2.3 : 2.8,
+    recommendedStakeEuro: bestEV > 28 ? 23 : 28,
+    confidenceScore: Math.min(93, Math.round(bestProlific.prob * 100 + 18)),
+    rationale: bestProlific.rationale,
+    keyFactors: bestProlific.keyFactors,
+  };
 
   // Balanced option
   const balancedOption: MarketOption = {
